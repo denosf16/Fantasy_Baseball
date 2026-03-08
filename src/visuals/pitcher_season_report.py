@@ -1,274 +1,23 @@
 from pathlib import Path
-import math
 import sys
 
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
-from matplotlib.patches import Rectangle, Polygon
 
 from src.db_connect import engine
 from src.queries.statcast_queries import get_pitcher_season
+from src.utils.pitch_config import PITCH_NAME_MAP, get_pitch_colors
+from src.utils.report_helpers import (
+    classify_in_zone,
+    build_pitch_summary_pitcher,
+    format_table_df,
+    add_pitchtype_heatmap_grid,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 OUT_DIR = BASE_DIR / "outputs" / "png" / "pitchers" / "season"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-PITCH_COLORS = {
-    "FF": "#e41a1c",
-    "SI": "#ff7f00",
-    "FC": "#a65628",
-    "SL": "#377eb8",
-    "ST": "#6baed6",
-    "CU": "#4daf4a",
-    "CH": "#984ea3",
-    "FS": "#f781bf",
-    "KC": "#33a02c",
-    "SV": "#1f78b4",
-    "CS": "#b2df8a",
-    "EP": "#999999",
-    "KN": "#17becf",
-    "FO": "#bc80bd",
-    "SC": "#8dd3c7",
-    "UNK": "#666666",
-}
-
-PITCH_NAME_MAP = {
-    "FF": "4-Seam",
-    "SI": "Sinker",
-    "FC": "Cutter",
-    "SL": "Slider",
-    "ST": "Sweeper",
-    "CU": "Curveball",
-    "CH": "Changeup",
-    "FS": "Splitter",
-    "KC": "Knuckle Curve",
-    "SV": "Slurve",
-    "CS": "Slow Curve",
-    "EP": "Eephus",
-    "KN": "Knuckleball",
-    "FO": "Forkball",
-    "SC": "Screwball",
-    "UNK": "Unknown",
-}
-
-
-def get_pitch_colors(pitch_types: list[str]) -> dict[str, str]:
-    return {pt: PITCH_COLORS.get(pt, "#666666") for pt in pitch_types}
-
-
-def classify_in_zone(zone_value) -> int:
-    try:
-        return int(zone_value) in range(1, 10)
-    except Exception:
-        return 0
-
-
-def draw_zone(ax) -> None:
-    zone_left = -0.83
-    zone_bottom = 1.5
-    zone_width = 1.66
-    zone_height = 2.0
-
-    strike_zone = Rectangle(
-        (zone_left, zone_bottom),
-        zone_width,
-        zone_height,
-        fill=False,
-        linewidth=1.5,
-        edgecolor="black",
-    )
-    ax.add_patch(strike_zone)
-
-    for i in range(1, 3):
-        ax.plot(
-            [zone_left + i * (zone_width / 3), zone_left + i * (zone_width / 3)],
-            [zone_bottom, zone_bottom + zone_height],
-            color="black",
-            linewidth=0.6,
-            alpha=0.45,
-        )
-        ax.plot(
-            [zone_left, zone_left + zone_width],
-            [zone_bottom + i * (zone_height / 3), zone_bottom + i * (zone_height / 3)],
-            color="black",
-            linewidth=0.6,
-            alpha=0.45,
-        )
-
-    home_plate = Polygon(
-        [
-            (-0.708, 0.1),
-            (0.708, 0.1),
-            (0.5, -0.15),
-            (0.0, -0.30),
-            (-0.5, -0.15),
-        ],
-        closed=True,
-        fill=False,
-        linewidth=1.5,
-        edgecolor="black",
-    )
-    ax.add_patch(home_plate)
-
-    ax.set_xlim(2.2, -2.2)
-    ax.set_ylim(-0.5, 4.8)
-    ax.grid(alpha=0.12)
-
-
-def draw_kde(ax, df: pd.DataFrame, title: str) -> None:
-    draw_zone(ax)
-
-    if df.empty or df["plate_x"].dropna().empty or df["plate_z"].dropna().empty:
-        ax.set_title(title, fontsize=10)
-        ax.text(
-            0.5,
-            0.5,
-            "No data",
-            ha="center",
-            va="center",
-            transform=ax.transAxes,
-            fontsize=9,
-        )
-        return
-
-    if len(df) < 3 or df["plate_x"].nunique() < 2 or df["plate_z"].nunique() < 2:
-        ax.set_title(title, fontsize=10)
-        ax.text(
-            0.5,
-            0.5,
-            "Not enough data",
-            ha="center",
-            va="center",
-            transform=ax.transAxes,
-            fontsize=9,
-        )
-        return
-
-    sns.kdeplot(
-        data=df,
-        x="plate_x",
-        y="plate_z",
-        fill=True,
-        thresh=0.05,
-        levels=20,
-        cmap="coolwarm",
-        alpha=0.9,
-        bw_adjust=1.0,
-        warn_singular=False,
-        ax=ax,
-    )
-
-    draw_zone(ax)
-    ax.set_title(title, fontsize=10)
-
-
-def build_pitch_summary(df: pd.DataFrame) -> pd.DataFrame:
-    summary = (
-        df.groupby("pitch_type_plot", dropna=False)
-        .agg(
-            pitches=("pitch_type_plot", "size"),
-            avg_velo=("release_speed", "mean"),
-            max_velo=("release_speed", "max"),
-            avg_ivb=("pfx_z_in", "mean"),
-            avg_hb=("pfx_x_in", "mean"),
-            whiffs=("is_whiff", "sum"),
-            called_strikes=("is_called_strike", "sum"),
-            fouls=("is_foul", "sum"),
-            in_play=("is_in_play", "sum"),
-            swings=("is_swing", "sum"),
-            zone_pitches=("in_zone", "sum"),
-        )
-        .reset_index()
-        .rename(columns={"pitch_type_plot": "pitch_type"})
-    )
-
-    summary["csw"] = summary["whiffs"] + summary["called_strikes"]
-    summary["strike_events"] = (
-        summary["whiffs"]
-        + summary["called_strikes"]
-        + summary["fouls"]
-        + summary["in_play"]
-    )
-    summary["usage_pct"] = 100 * summary["pitches"] / summary["pitches"].sum()
-    summary["strike_pct"] = 100 * summary["strike_events"] / summary["pitches"]
-    summary["whiff_pct"] = 100 * summary["whiffs"] / summary["swings"].replace(0, pd.NA)
-    summary["csw_pct"] = 100 * summary["csw"] / summary["pitches"]
-    summary["zone_pct"] = 100 * summary["zone_pitches"] / summary["pitches"]
-    summary["pitch_name"] = (
-        summary["pitch_type"].map(PITCH_NAME_MAP).fillna(summary["pitch_type"])
-    )
-
-    return summary.sort_values(
-        ["pitches", "pitch_type"], ascending=[False, True]
-    ).reset_index(drop=True)
-
-
-def format_table_df(tbl_df: pd.DataFrame) -> pd.DataFrame:
-    out = tbl_df.copy()
-    round_cols = [
-        "usage_pct",
-        "avg_velo",
-        "max_velo",
-        "avg_ivb",
-        "avg_hb",
-        "zone_pct",
-        "strike_pct",
-        "whiff_pct",
-        "csw_pct",
-    ]
-    for col in round_cols:
-        out[col] = out[col].apply(lambda x: "-" if pd.isna(x) else round(float(x), 1))
-    return out
-
-
-def add_pitchtype_heatmap_grid(
-    fig,
-    subspec,
-    handed_df: pd.DataFrame,
-    pitch_order: list[str],
-    side_label: str,
-) -> None:
-    n = len(pitch_order)
-    ncols = min(3, max(1, n))
-    nrows = math.ceil(n / ncols)
-
-    subgs = subspec.subgridspec(nrows, ncols, wspace=0.18, hspace=0.30)
-
-    for idx, pitch_type in enumerate(pitch_order):
-        r = idx // ncols
-        c = idx % ncols
-        ax = fig.add_subplot(subgs[r, c])
-
-        sub = handed_df[handed_df["pitch_type_plot"] == pitch_type].copy()
-        title = f"{pitch_type} | {PITCH_NAME_MAP.get(pitch_type, pitch_type)}\nN={len(sub)}"
-        draw_kde(ax, sub, title)
-
-        if r < nrows - 1:
-            ax.set_xlabel("")
-        else:
-            ax.set_xlabel("plate_x", fontsize=9)
-
-        if c > 0:
-            ax.set_ylabel("")
-        else:
-            ax.set_ylabel("plate_z", fontsize=9)
-
-    total_slots = nrows * ncols
-    for idx in range(n, total_slots):
-        r = idx // ncols
-        c = idx % ncols
-        ax = fig.add_subplot(subgs[r, c])
-        ax.axis("off")
-
-    title_ax = fig.add_subplot(subspec)
-    title_ax.axis("off")
-    title_ax.set_title(
-        f"Location Density {side_label} by Pitch Type",
-        fontsize=12,
-        pad=8,
-    )
 
 
 def main():
@@ -292,7 +41,7 @@ def main():
     df["pfx_x_in"] = df["pfx_x"] * 12
     df["pfx_z_in"] = df["pfx_z"] * 12
 
-    pitch_summary = build_pitch_summary(df)
+    pitch_summary = build_pitch_summary_pitcher(df)
     pitch_order = pitch_summary["pitch_type"].tolist()
 
     pitch_types = sorted(df["pitch_type_plot"].unique())
@@ -397,8 +146,8 @@ def main():
     ax_move.set_aspect("equal", adjustable="box")
     ax_move.grid(alpha=0.15)
 
-    add_pitchtype_heatmap_grid(fig, lhb_spec, df_lhb, pitch_order, "vs LHB")
-    add_pitchtype_heatmap_grid(fig, rhb_spec, df_rhb, pitch_order, "vs RHB")
+    add_pitchtype_heatmap_grid(fig, lhb_spec, df_lhb, pitch_order, "vs LHB", min_points=3)
+    add_pitchtype_heatmap_grid(fig, rhb_spec, df_rhb, pitch_order, "vs RHB", min_points=3)
 
     ax_trend.plot(
         range(len(game_summary)),
@@ -435,7 +184,21 @@ def main():
             "csw_pct",
         ]
     ].copy()
-    tbl_df = format_table_df(tbl_df)
+
+    tbl_df = format_table_df(
+        tbl_df,
+        round_cols=[
+            "usage_pct",
+            "avg_velo",
+            "max_velo",
+            "avg_ivb",
+            "avg_hb",
+            "zone_pct",
+            "strike_pct",
+            "whiff_pct",
+            "csw_pct",
+        ],
+    )
 
     col_labels = [
         "Type",

@@ -3,241 +3,22 @@ import sys
 
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle, Polygon, Arc
 
 from src.db_connect import engine
 from src.queries.statcast_queries import get_hitter_game
+from src.utils.pitch_config import PITCH_NAME_MAP, get_pitch_colors
+from src.utils.plot_helpers import draw_zone, draw_spray_chart
+from src.utils.report_helpers import (
+    classify_in_zone,
+    build_title_date,
+    build_pitch_summary_hitter,
+    format_table_df,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 OUT_DIR = BASE_DIR / "outputs" / "png" / "hitters" / "game"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-PITCH_COLORS = {
-    "FF": "#e41a1c",
-    "SI": "#ff7f00",
-    "FC": "#a65628",
-    "SL": "#377eb8",
-    "ST": "#6baed6",
-    "CU": "#4daf4a",
-    "CH": "#984ea3",
-    "FS": "#f781bf",
-    "KC": "#33a02c",
-    "SV": "#1f78b4",
-    "CS": "#b2df8a",
-    "EP": "#999999",
-    "KN": "#17becf",
-    "FO": "#bc80bd",
-    "SC": "#8dd3c7",
-    "UNK": "#666666",
-}
-
-PITCH_NAME_MAP = {
-    "FF": "4-Seam",
-    "SI": "Sinker",
-    "FC": "Cutter",
-    "SL": "Slider",
-    "ST": "Sweeper",
-    "CU": "Curveball",
-    "CH": "Changeup",
-    "FS": "Splitter",
-    "KC": "Knuckle Curve",
-    "SV": "Slurve",
-    "CS": "Slow Curve",
-    "EP": "Eephus",
-    "KN": "Knuckleball",
-    "FO": "Forkball",
-    "SC": "Screwball",
-    "UNK": "Unknown",
-}
-
-
-def get_pitch_colors(pitch_types: list[str]) -> dict[str, str]:
-    return {pt: PITCH_COLORS.get(pt, "#666666") for pt in pitch_types}
-
-
-def build_title_date(value) -> str:
-    return pd.to_datetime(value).strftime("%Y-%m-%d")
-
-
-def classify_in_zone(zone_value) -> int:
-    try:
-        return int(zone_value) in range(1, 10)
-    except Exception:
-        return 0
-
-
-def draw_zone(ax) -> None:
-    zone_left = -0.83
-    zone_bottom = 1.5
-    zone_width = 1.66
-    zone_height = 2.0
-
-    strike_zone = Rectangle(
-        (zone_left, zone_bottom),
-        zone_width,
-        zone_height,
-        fill=False,
-        linewidth=1.8,
-        edgecolor="black",
-    )
-    ax.add_patch(strike_zone)
-
-    for i in range(1, 3):
-        ax.plot(
-            [zone_left + i * (zone_width / 3), zone_left + i * (zone_width / 3)],
-            [zone_bottom, zone_bottom + zone_height],
-            color="black",
-            linewidth=0.6,
-            alpha=0.45,
-        )
-        ax.plot(
-            [zone_left, zone_left + zone_width],
-            [zone_bottom + i * (zone_height / 3), zone_bottom + i * (zone_height / 3)],
-            color="black",
-            linewidth=0.6,
-            alpha=0.45,
-        )
-
-    home_plate = Polygon(
-        [
-            (-0.708, 0.1),
-            (0.708, 0.1),
-            (0.5, -0.15),
-            (0.0, -0.30),
-            (-0.5, -0.15),
-        ],
-        closed=True,
-        fill=False,
-        linewidth=1.6,
-        edgecolor="black",
-    )
-    ax.add_patch(home_plate)
-
-    ax.set_xlim(2.2, -2.2)
-    ax.set_ylim(-0.5, 4.8)
-    ax.grid(alpha=0.12)
-
-
-def draw_spray_chart(ax, df_bip: pd.DataFrame) -> None:
-    ax.set_title("Spray Chart")
-    ax.set_aspect("equal", adjustable="box")
-
-    infield_arc = Arc(
-        (0, 0),
-        180,
-        180,
-        theta1=45,
-        theta2=135,
-        linewidth=1.2,
-        color="black",
-    )
-    outfield_arc = Arc(
-        (0, 0),
-        320,
-        320,
-        theta1=45,
-        theta2=135,
-        linewidth=1.2,
-        color="black",
-        alpha=0.6,
-    )
-    ax.add_patch(infield_arc)
-    ax.add_patch(outfield_arc)
-
-    ax.plot([0, -113], [0, 113], color="black", linewidth=1)
-    ax.plot([0, 113], [0, 113], color="black", linewidth=1)
-
-    if not df_bip.empty:
-        has_hc = {"hc_x", "hc_y"}.issubset(df_bip.columns)
-        if has_hc and df_bip["hc_x"].notna().any() and df_bip["hc_y"].notna().any():
-            ax.scatter(
-                df_bip["hc_x"],
-                df_bip["hc_y"],
-                s=70,
-                alpha=0.75,
-                edgecolors="black",
-                linewidths=0.3,
-            )
-        elif "hit_distance_sc" in df_bip.columns and df_bip["hit_distance_sc"].notna().any():
-            temp = df_bip.copy()
-            n = len(temp)
-            temp["plot_x"] = pd.Series(range(n)).apply(
-                lambda i: (-1) ** i * (20 + (i % 8) * 10)
-            )
-            temp["plot_y"] = temp["hit_distance_sc"].fillna(0)
-            ax.scatter(
-                temp["plot_x"],
-                temp["plot_y"],
-                s=70,
-                alpha=0.75,
-                edgecolors="black",
-                linewidths=0.3,
-            )
-        else:
-            ax.text(
-                0.5,
-                0.5,
-                "No spray coordinates available",
-                transform=ax.transAxes,
-                ha="center",
-                va="center",
-            )
-
-    ax.set_xlim(-130, 130)
-    ax.set_ylim(-10, 330)
-    ax.set_xlabel("")
-    ax.set_ylabel("")
-    ax.grid(alpha=0.1)
-
-
-def build_pitch_summary(df: pd.DataFrame) -> pd.DataFrame:
-    summary = (
-        df.groupby("pitch_type_plot", dropna=False)
-        .agg(
-            pitches_seen=("pitch_type_plot", "size"),
-            swings=("is_swing", "sum"),
-            whiffs=("is_whiff", "sum"),
-            called_strikes=("is_called_strike", "sum"),
-            balls_in_play=("is_in_play", "sum"),
-            avg_velo_seen=("release_speed", "mean"),
-            avg_ev=("launch_speed", "mean"),
-            avg_la=("launch_angle", "mean"),
-            zone_seen=("in_zone", "sum"),
-        )
-        .reset_index()
-        .rename(columns={"pitch_type_plot": "pitch_type"})
-    )
-
-    summary["swing_pct"] = 100 * summary["swings"] / summary["pitches_seen"]
-    summary["whiff_pct"] = 100 * summary["whiffs"] / summary["swings"].replace(0, pd.NA)
-    summary["called_strike_pct"] = 100 * summary["called_strikes"] / summary["pitches_seen"]
-    summary["in_play_pct"] = 100 * summary["balls_in_play"] / summary["pitches_seen"]
-    summary["zone_pct"] = 100 * summary["zone_seen"] / summary["pitches_seen"]
-    summary["pitch_name"] = (
-        summary["pitch_type"].map(PITCH_NAME_MAP).fillna(summary["pitch_type"])
-    )
-
-    return summary.sort_values(
-        ["pitches_seen", "pitch_type"], ascending=[False, True]
-    ).reset_index(drop=True)
-
-
-def format_table_df(tbl_df: pd.DataFrame) -> pd.DataFrame:
-    out = tbl_df.copy()
-    round_cols = [
-        "avg_velo_seen",
-        "avg_ev",
-        "avg_la",
-        "swing_pct",
-        "whiff_pct",
-        "called_strike_pct",
-        "in_play_pct",
-        "zone_pct",
-    ]
-    for col in round_cols:
-        out[col] = out[col].apply(lambda x: "-" if pd.isna(x) else round(float(x), 1))
-    return out
 
 
 def main():
@@ -292,7 +73,7 @@ def main():
     )
 
     bip_df = df[df["is_in_play"] == 1].copy()
-    pitch_summary = build_pitch_summary(df)
+    pitch_summary = build_pitch_summary_hitter(df)
 
     fig = plt.figure(figsize=(15, 11))
     gs = fig.add_gridspec(3, 2, height_ratios=[1.0, 1.0, 0.95])
@@ -322,19 +103,21 @@ def main():
     ax_loc.legend(title="Pitch Type", fontsize=8, loc="upper right")
 
     ax_evla.set_title("Exit Velocity vs Launch Angle")
-    if (
-        not bip_df.empty
-        and bip_df["launch_speed"].notna().any()
-        and bip_df["launch_angle"].notna().any()
-    ):
+    valid_evla = bip_df[
+        bip_df["launch_speed"].notna() & bip_df["launch_angle"].notna()
+    ].copy()
+
+    if not valid_evla.empty:
         ax_evla.scatter(
-            bip_df["launch_angle"],
-            bip_df["launch_speed"],
+            valid_evla["launch_angle"],
+            valid_evla["launch_speed"],
             s=80,
             alpha=0.8,
             edgecolors="black",
             linewidths=0.3,
         )
+        ax_evla.set_xlim(-30, 60)
+        ax_evla.set_ylim(50, 115)
     else:
         ax_evla.text(
             0.5,
@@ -344,11 +127,12 @@ def main():
             ha="center",
             va="center",
         )
+
     ax_evla.set_xlabel("Launch Angle")
     ax_evla.set_ylabel("Exit Velocity")
     ax_evla.grid(alpha=0.15)
 
-    draw_spray_chart(ax_spray, bip_df)
+    draw_spray_chart(ax_spray, bip_df, title="Spray Chart")
 
     summary_box = pd.DataFrame(
         {
@@ -370,6 +154,7 @@ def main():
             ],
         }
     )
+
     ax_zone.axis("off")
     zone_table = ax_zone.table(
         cellText=summary_box.values,
@@ -397,7 +182,20 @@ def main():
             "zone_pct",
         ]
     ].copy()
-    tbl_df = format_table_df(tbl_df)
+
+    tbl_df = format_table_df(
+        tbl_df,
+        round_cols=[
+            "avg_velo_seen",
+            "avg_ev",
+            "avg_la",
+            "swing_pct",
+            "whiff_pct",
+            "called_strike_pct",
+            "in_play_pct",
+            "zone_pct",
+        ],
+    )
 
     col_labels = [
         "Type",
