@@ -1,6 +1,27 @@
--- Chart-ready marts / views
--- Initial placeholders. We will define these in detail after clean tables are ready.
-
--- Example:
--- CREATE VIEW mart.pitcher_game_chart_input AS ...
--- CREATE VIEW mart.hitter_game_chart_input AS ...
+CREATE OR ALTER VIEW mart.pitcher_game_chart_input AS
+SELECT
+    p.pitch_event_id,
+    p.game_pk,
+    p.game_date,
+    p.inning,
+    p.inning_half,
+    p.pitcher_id,
+    p.pitcher_name,
+    p.batter_id,
+    p.pitch_type,
+    p.pitch_name,
+    p.release_speed,
+    p.release_spin_rate,
+    p.plate_x,
+    p.plate_z,
+    p.pfx_x,
+    p.pfx_z,
+    p.zone,
+    p.description,
+    p.events,
+    p.is_whiff,
+    p.is_called_strike,
+    p.is_ball,
+    p.is_foul,
+    p.is_in_play
+FROM clean.pitches p;
