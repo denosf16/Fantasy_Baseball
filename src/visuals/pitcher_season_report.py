@@ -127,10 +127,16 @@ def draw_zone(ax) -> None:
 
 
 def draw_kde(ax, df: pd.DataFrame, title: str) -> None:
+    draw_zone(ax)
+
     if df.empty or df["plate_x"].dropna().empty or df["plate_z"].dropna().empty:
-        draw_zone(ax)
         ax.set_title(title)
         ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+        return
+
+    if len(df) < 3 or df["plate_x"].nunique() < 2 or df["plate_z"].nunique() < 2:
+        ax.set_title(title)
+        ax.text(0.5, 0.5, "Not enough data", ha="center", va="center", transform=ax.transAxes)
         return
 
     sns.kdeplot(
@@ -143,6 +149,7 @@ def draw_kde(ax, df: pd.DataFrame, title: str) -> None:
         cmap="coolwarm",
         alpha=0.9,
         bw_adjust=1.0,
+        warn_singular=False,
         ax=ax,
     )
 
@@ -415,7 +422,7 @@ def main():
         bbox=dict(boxstyle="round,pad=0.35", facecolor="white", edgecolor="gray", alpha=0.95),
     )
 
-    plt.tight_layout(rect=[0, 0, 1, 0.90])
+    fig.subplots_adjust(top=0.90, bottom=0.05, left=0.05, right=0.98, hspace=0.32, wspace=0.22)
 
     output_file = OUT_DIR / f"pitcher_season_report_{pitcher_id}_{season}.png"
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
