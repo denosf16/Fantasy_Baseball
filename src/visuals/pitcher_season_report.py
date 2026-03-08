@@ -4,6 +4,7 @@ import urllib
 
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 from matplotlib.patches import Rectangle, Polygon
 from sqlalchemy import create_engine
 
@@ -122,7 +123,31 @@ def draw_zone(ax) -> None:
     ax.set_ylim(-0.5, 4.8)
     ax.set_xlabel("Plate X")
     ax.set_ylabel("Plate Z")
-    ax.grid(alpha=0.15)
+    ax.grid(alpha=0.12)
+
+
+def draw_kde(ax, df: pd.DataFrame, title: str) -> None:
+    if df.empty or df["plate_x"].dropna().empty or df["plate_z"].dropna().empty:
+        draw_zone(ax)
+        ax.set_title(title)
+        ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+        return
+
+    sns.kdeplot(
+        data=df,
+        x="plate_x",
+        y="plate_z",
+        fill=True,
+        thresh=0.05,
+        levels=20,
+        cmap="coolwarm",
+        alpha=0.9,
+        bw_adjust=1.0,
+        ax=ax,
+    )
+
+    draw_zone(ax)
+    ax.set_title(title)
 
 
 def build_pitch_summary(df: pd.DataFrame) -> pd.DataFrame:
@@ -189,11 +214,11 @@ def main():
         season = 2025
 
     query = f"""
-    SELECT
-        p.*
-    FROM clean.pitches p
-    WHERE p.pitcher_id = {pitcher_id}
-      AND YEAR(p.game_date) = {season}
+        SELECT
+            p.*
+        FROM clean.pitches p
+        WHERE p.pitcher_id = {pitcher_id}
+          AND p.season = {season}
     """
 
     df = pd.read_sql(query, engine)
@@ -203,6 +228,7 @@ def main():
         return
 
     df = df.copy()
+    df["game_date"] = pd.to_datetime(df["game_date"])
     df["pitch_type_plot"] = df["pitch_type"].fillna("UNK")
     df["in_zone"] = df["zone"].apply(classify_in_zone).astype(int)
     df["pfx_x_in"] = df["pfx_x"] * 12
@@ -227,7 +253,6 @@ def main():
     df_lhb = df[df["batter_stand"] == "L"].copy()
     df_rhb = df[df["batter_stand"] == "R"].copy()
 
-    # Rolling CSW by game
     game_summary = (
         df.groupby("game_pk")
         .agg(
@@ -254,7 +279,6 @@ def main():
     ax_trend = fig.add_subplot(gs[2, 0])
     ax_tbl = fig.add_subplot(gs[2, 1])
 
-    # Pitch mix / usage
     ax_usage.bar(
         pitch_summary["pitch_type"],
         pitch_summary["usage_pct"],
@@ -267,7 +291,6 @@ def main():
     ax_usage.set_xlabel("Pitch Type")
     ax_usage.grid(axis="y", alpha=0.15)
 
-    # Movement
     for pt in pitch_types:
         sub = df[df["pitch_type_plot"] == pt]
         ax_move.scatter(
@@ -279,6 +302,7 @@ def main():
             edgecolors="black",
             linewidths=0.2,
         )
+
     centroids = df.groupby("pitch_type_plot")[["pfx_x_in", "pfx_z_in"]].mean()
     for pt, row in centroids.iterrows():
         ax_move.text(
@@ -291,6 +315,7 @@ def main():
             va="center",
             color="black",
         )
+
     ax_move.axhline(0, color="black", linewidth=1)
     ax_move.axvline(0, color="black", linewidth=1)
     ax_move.set_title("Movement Clusters")
@@ -301,37 +326,9 @@ def main():
     ax_move.set_aspect("equal", adjustable="box")
     ax_move.grid(alpha=0.15)
 
-    # Location vs LHB
-    for pt in sorted(df_lhb["pitch_type_plot"].dropna().unique()):
-        sub = df_lhb[df_lhb["pitch_type_plot"] == pt]
-        ax_lhb.scatter(
-            sub["plate_x"],
-            sub["plate_z"],
-            color=color_map[pt],
-            s=45,
-            alpha=0.55,
-            edgecolors="black",
-            linewidths=0.2,
-        )
-    draw_zone(ax_lhb)
-    ax_lhb.set_title("Season Location vs LHB")
+    draw_kde(ax_lhb, df_lhb, "Season Location Density vs LHB")
+    draw_kde(ax_rhb, df_rhb, "Season Location Density vs RHB")
 
-    # Location vs RHB
-    for pt in sorted(df_rhb["pitch_type_plot"].dropna().unique()):
-        sub = df_rhb[df_rhb["pitch_type_plot"] == pt]
-        ax_rhb.scatter(
-            sub["plate_x"],
-            sub["plate_z"],
-            color=color_map[pt],
-            s=45,
-            alpha=0.55,
-            edgecolors="black",
-            linewidths=0.2,
-        )
-    draw_zone(ax_rhb)
-    ax_rhb.set_title("Season Location vs RHB")
-
-    # Rolling CSW
     ax_trend.plot(
         range(len(game_summary)),
         game_summary["csw_pct"],
@@ -351,7 +348,6 @@ def main():
     ax_trend.grid(alpha=0.15)
     ax_trend.legend()
 
-    # Table
     ax_tbl.axis("off")
     tbl_df = pitch_summary[
         [

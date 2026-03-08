@@ -4,6 +4,7 @@ import urllib
 
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 from matplotlib.patches import Rectangle, Polygon
 from sqlalchemy import create_engine
 
@@ -116,6 +117,30 @@ def draw_zone(ax) -> None:
     ax.set_xlabel("Plate X")
     ax.set_ylabel("Plate Z")
     ax.grid(alpha=0.15)
+
+
+def draw_kde(ax, df: pd.DataFrame, title: str) -> None:
+    if df.empty or df["plate_x"].dropna().empty or df["plate_z"].dropna().empty:
+        draw_zone(ax)
+        ax.set_title(title)
+        ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+        return
+
+    sns.kdeplot(
+        data=df,
+        x="plate_x",
+        y="plate_z",
+        fill=True,
+        thresh=0.05,
+        levels=20,
+        cmap="coolwarm",
+        alpha=0.9,
+        bw_adjust=1.0,
+        ax=ax,
+    )
+
+    draw_zone(ax)
+    ax.set_title(title)
 
 
 def build_title_date(value) -> str:
@@ -249,6 +274,7 @@ def main():
     ax_rhb = fig.add_subplot(gs[1, 1])
     ax_tbl = fig.add_subplot(gs[2, :])
 
+    # Overall location scatter stays as scatter
     for pt in pitch_types:
         sub = df[df["pitch_type_plot"] == pt]
         ax_loc.scatter(
@@ -265,6 +291,7 @@ def main():
     ax_loc.set_title("Pitch Location")
     ax_loc.legend(title="Pitch Type", fontsize=9, loc="upper right")
 
+    # Movement
     for pt in pitch_types:
         sub = df[df["pitch_type_plot"] == pt]
         ax_move.scatter(
@@ -300,33 +327,9 @@ def main():
             color="black",
         )
 
-    for pt in sorted(df_lhb["pitch_type_plot"].dropna().unique()):
-        sub = df_lhb[df_lhb["pitch_type_plot"] == pt]
-        ax_lhb.scatter(
-            sub["plate_x"],
-            sub["plate_z"],
-            color=color_map[pt],
-            s=80,
-            alpha=0.8,
-            edgecolors="black",
-            linewidths=0.3,
-        )
-    draw_zone(ax_lhb)
-    ax_lhb.set_title("Location vs LHB")
-
-    for pt in sorted(df_rhb["pitch_type_plot"].dropna().unique()):
-        sub = df_rhb[df_rhb["pitch_type_plot"] == pt]
-        ax_rhb.scatter(
-            sub["plate_x"],
-            sub["plate_z"],
-            color=color_map[pt],
-            s=80,
-            alpha=0.8,
-            edgecolors="black",
-            linewidths=0.3,
-        )
-    draw_zone(ax_rhb)
-    ax_rhb.set_title("Location vs RHB")
+    # Replace vs handedness scatterplots with KDE heatmaps
+    draw_kde(ax_lhb, df_lhb, "Location Density vs LHB")
+    draw_kde(ax_rhb, df_rhb, "Location Density vs RHB")
 
     ax_tbl.axis("off")
     tbl_df = pitch_summary[
