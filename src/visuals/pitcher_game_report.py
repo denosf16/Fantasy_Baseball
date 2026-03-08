@@ -1,27 +1,19 @@
 from pathlib import Path
 import math
 import sys
-import urllib
 
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.patches import Rectangle, Polygon
-from sqlalchemy import create_engine
+
+from src.db_connect import engine
+from src.queries.statcast_queries import get_pitcher_game
+
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 OUT_DIR = BASE_DIR / "outputs" / "png"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-SERVER = r"RAMSEY_BOLTON\SQLEXPRESS"
-DATABASE = "fantasy_baseball"
-DRIVER = "ODBC Driver 17 for SQL Server"
-
-params = urllib.parse.quote_plus(
-    f"DRIVER={{{DRIVER}}};SERVER={SERVER};DATABASE={DATABASE};Trusted_Connection=yes;"
-)
-
-engine = create_engine(f"mssql+pyodbc:///?odbc_connect={params}")
 
 PITCH_COLORS = {
     "FF": "#e41a1c",
@@ -123,12 +115,28 @@ def draw_kde(ax, df: pd.DataFrame, title: str) -> None:
 
     if df.empty or df["plate_x"].dropna().empty or df["plate_z"].dropna().empty:
         ax.set_title(title, fontsize=10)
-        ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes, fontsize=9)
+        ax.text(
+            0.5,
+            0.5,
+            "No data",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+            fontsize=9,
+        )
         return
 
     if len(df) < 3 or df["plate_x"].nunique() < 2 or df["plate_z"].nunique() < 2:
         ax.set_title(title, fontsize=10)
-        ax.text(0.5, 0.5, "Not enough data", ha="center", va="center", transform=ax.transAxes, fontsize=9)
+        ax.text(
+            0.5,
+            0.5,
+            "Not enough data",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+            fontsize=9,
+        )
         return
 
     sns.kdeplot(
@@ -191,9 +199,13 @@ def build_pitch_summary(df: pd.DataFrame) -> pd.DataFrame:
     summary["whiff_pct"] = 100 * summary["whiffs"] / summary["swings"].replace(0, pd.NA)
     summary["csw_pct"] = 100 * summary["csw"] / summary["pitches"]
     summary["zone_pct"] = 100 * summary["zone_pitches"] / summary["pitches"]
-    summary["pitch_name"] = summary["pitch_type"].map(PITCH_NAME_MAP).fillna(summary["pitch_type"])
+    summary["pitch_name"] = (
+        summary["pitch_type"].map(PITCH_NAME_MAP).fillna(summary["pitch_type"])
+    )
 
-    return summary.sort_values(["pitches", "pitch_type"], ascending=[False, True]).reset_index(drop=True)
+    return summary.sort_values(
+        ["pitches", "pitch_type"], ascending=[False, True]
+    ).reset_index(drop=True)
 
 
 def format_table_df(tbl_df: pd.DataFrame) -> pd.DataFrame:
@@ -213,7 +225,13 @@ def format_table_df(tbl_df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def add_pitchtype_heatmap_grid(fig, subspec, handed_df: pd.DataFrame, pitch_order: list[str], side_label: str) -> None:
+def add_pitchtype_heatmap_grid(
+    fig,
+    subspec,
+    handed_df: pd.DataFrame,
+    pitch_order: list[str],
+    side_label: str,
+) -> None:
     n = len(pitch_order)
     ncols = min(3, max(1, n))
     nrows = math.ceil(n / ncols)
@@ -248,7 +266,11 @@ def add_pitchtype_heatmap_grid(fig, subspec, handed_df: pd.DataFrame, pitch_orde
 
     title_ax = fig.add_subplot(subspec)
     title_ax.axis("off")
-    title_ax.set_title(f"Location Density {side_label} by Pitch Type", fontsize=12, pad=8)
+    title_ax.set_title(
+        f"Location Density {side_label} by Pitch Type",
+        fontsize=12,
+        pad=8,
+    )
 
 
 def main():
@@ -259,14 +281,7 @@ def main():
         pitcher_id = 543135
         game_pk = 778553
 
-    query = f"""
-        SELECT *
-        FROM mart.pitcher_game_chart_input
-        WHERE pitcher_id = {pitcher_id}
-          AND game_pk = {game_pk}
-    """
-
-    df = pd.read_sql(query, engine)
+    df = get_pitcher_game(engine, pitcher_id, game_pk)
 
     if df.empty:
         print("No data found.")
@@ -292,7 +307,11 @@ def main():
     called_strikes = int(df["is_called_strike"].fillna(0).sum())
     csw = whiffs + called_strikes
     csw_pct = round(100 * csw / total_pitches, 1) if total_pitches else 0
-    avg_velo = round(df["release_speed"].dropna().mean(), 1) if df["release_speed"].notna().any() else None
+    avg_velo = (
+        round(df["release_speed"].dropna().mean(), 1)
+        if df["release_speed"].notna().any()
+        else None
+    )
     zone_pct = round(100 * df["in_zone"].mean(), 1) if total_pitches else 0
 
     df_lhb = df[df["batter_stand"] == "L"].copy()
@@ -311,7 +330,13 @@ def main():
     primary_pitch = pitch_summary.iloc[0]["pitch_type"] if not pitch_summary.empty else "UNK"
 
     fig = plt.figure(figsize=(16, 16))
-    gs = fig.add_gridspec(4, 2, height_ratios=[1.0, 1.15, 1.15, 0.95], hspace=0.35, wspace=0.18)
+    gs = fig.add_gridspec(
+        4,
+        2,
+        height_ratios=[1.0, 1.15, 1.15, 0.95],
+        hspace=0.35,
+        wspace=0.18,
+    )
 
     ax_loc = fig.add_subplot(gs[0, 0])
     ax_move = fig.add_subplot(gs[0, 1])
@@ -319,7 +344,6 @@ def main():
     rhb_spec = gs[1:3, 1]
     ax_tbl = fig.add_subplot(gs[3, :])
 
-    # Overall location scatter
     for pt in pitch_order:
         sub = df[df["pitch_type_plot"] == pt]
         ax_loc.scatter(
@@ -338,7 +362,6 @@ def main():
     ax_loc.set_ylabel("Plate Z")
     ax_loc.legend(title="Pitch Type", fontsize=8, loc="upper right")
 
-    # Movement
     for pt in pitch_order:
         sub = df[df["pitch_type_plot"] == pt]
         ax_move.scatter(
@@ -373,11 +396,9 @@ def main():
             color="black",
         )
 
-    # Handedness pitch-type heatmap grids
     add_pitchtype_heatmap_grid(fig, lhb_spec, df_lhb, pitch_order, "vs LHB")
     add_pitchtype_heatmap_grid(fig, rhb_spec, df_rhb, pitch_order, "vs RHB")
 
-    # Metrics table
     ax_tbl.axis("off")
     tbl_df = pitch_summary[
         [
@@ -395,7 +416,18 @@ def main():
     ].copy()
     tbl_df = format_table_df(tbl_df)
 
-    col_labels = ["Type", "#", "Usage%", "Velo", "IVB", "HB", "Zone%", "Strike%", "Whiff%", "CSW%"]
+    col_labels = [
+        "Type",
+        "#",
+        "Usage%",
+        "Velo",
+        "IVB",
+        "HB",
+        "Zone%",
+        "Strike%",
+        "Whiff%",
+        "CSW%",
+    ]
     table = ax_tbl.table(
         cellText=tbl_df.values,
         colLabels=col_labels,
@@ -408,7 +440,10 @@ def main():
     ax_tbl.set_title("Pitch Type Metrics", pad=12, fontsize=12)
 
     for row_idx, pitch_type in enumerate(tbl_df["pitch_type"], start=1):
-        table[(row_idx, 0)].set_text_props(color=color_map.get(pitch_type, "#666666"), weight="bold")
+        table[(row_idx, 0)].set_text_props(
+            color=color_map.get(pitch_type, "#666666"),
+            weight="bold",
+        )
 
     usage_lines = []
     for pitch_type in pitch_summary["pitch_type"]:
@@ -450,7 +485,12 @@ def main():
         ha="center",
         va="center",
         fontsize=11,
-        bbox=dict(boxstyle="round,pad=0.35", facecolor="white", edgecolor="gray", alpha=0.95),
+        bbox=dict(
+            boxstyle="round,pad=0.35",
+            facecolor="white",
+            edgecolor="gray",
+            alpha=0.95,
+        ),
     )
 
     fig.text(
@@ -462,7 +502,14 @@ def main():
         fontsize=9,
     )
 
-    fig.subplots_adjust(top=0.88, bottom=0.05, left=0.05, right=0.98, hspace=0.38, wspace=0.20)
+    fig.subplots_adjust(
+        top=0.88,
+        bottom=0.05,
+        left=0.05,
+        right=0.98,
+        hspace=0.38,
+        wspace=0.20,
+    )
 
     output_file = OUT_DIR / f"pitcher_report_{pitcher_id}_{game_pk}.png"
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
