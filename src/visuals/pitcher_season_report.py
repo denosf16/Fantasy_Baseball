@@ -64,6 +64,13 @@ def get_pitch_colors(pitch_types: list[str]) -> dict[str, str]:
     return {pt: PITCH_COLORS.get(pt, "#666666") for pt in pitch_types}
 
 
+def classify_in_zone(zone_value) -> int:
+    try:
+        return int(zone_value) in range(1, 10)
+    except Exception:
+        return 0
+
+
 def draw_zone(ax) -> None:
     zone_left = -0.83
     zone_bottom = 1.5
@@ -118,28 +125,17 @@ def draw_zone(ax) -> None:
     ax.grid(alpha=0.15)
 
 
-def build_title_date(value) -> str:
-    return pd.to_datetime(value).strftime("%Y-%m-%d")
-
-
-def classify_in_zone(zone_value) -> int:
-    try:
-        return int(zone_value) in range(1, 10)
-    except Exception:
-        return 0
-
-
 def build_pitch_summary(df: pd.DataFrame) -> pd.DataFrame:
     summary = (
         df.groupby("pitch_type_plot", dropna=False)
         .agg(
             pitches=("pitch_type_plot", "size"),
             avg_velo=("release_speed", "mean"),
+            max_velo=("release_speed", "max"),
             avg_ivb=("pfx_z_in", "mean"),
             avg_hb=("pfx_x_in", "mean"),
             whiffs=("is_whiff", "sum"),
             called_strikes=("is_called_strike", "sum"),
-            balls=("is_ball", "sum"),
             fouls=("is_foul", "sum"),
             in_play=("is_in_play", "sum"),
             swings=("is_swing", "sum"),
@@ -171,6 +167,7 @@ def format_table_df(tbl_df: pd.DataFrame) -> pd.DataFrame:
     round_cols = [
         "usage_pct",
         "avg_velo",
+        "max_velo",
         "avg_ivb",
         "avg_hb",
         "zone_pct",
@@ -186,16 +183,17 @@ def format_table_df(tbl_df: pd.DataFrame) -> pd.DataFrame:
 def main():
     if len(sys.argv) >= 3:
         pitcher_id = int(sys.argv[1])
-        game_pk = int(sys.argv[2])
+        season = int(sys.argv[2])
     else:
         pitcher_id = 543135
-        game_pk = 778553
+        season = 2025
 
     query = f"""
-        SELECT *
-        FROM mart.pitcher_game_chart_input
-        WHERE pitcher_id = {pitcher_id}
-          AND game_pk = {game_pk}
+    SELECT
+        p.*
+    FROM clean.pitches p
+    WHERE p.pitcher_id = {pitcher_id}
+      AND YEAR(p.game_date) = {season}
     """
 
     df = pd.read_sql(query, engine)
@@ -205,7 +203,6 @@ def main():
         return
 
     df = df.copy()
-
     df["pitch_type_plot"] = df["pitch_type"].fillna("UNK")
     df["in_zone"] = df["zone"].apply(classify_in_zone).astype(int)
     df["pfx_x_in"] = df["pfx_x"] * 12
@@ -215,9 +212,8 @@ def main():
     color_map = get_pitch_colors(pitch_types)
 
     pitcher_name = df["pitcher_name"].dropna().iloc[0]
-    game_date = build_title_date(df["game_date"].iloc[0])
-
     total_pitches = len(df)
+    total_games = df["game_pk"].nunique()
     whiffs = int(df["is_whiff"].fillna(0).sum())
     called_strikes = int(df["is_called_strike"].fillna(0).sum())
     csw = whiffs + called_strikes
@@ -226,67 +222,63 @@ def main():
     zone_pct = round(100 * df["in_zone"].mean(), 1) if total_pitches else 0
 
     pitch_summary = build_pitch_summary(df)
+    primary_pitch = pitch_summary.iloc[0]["pitch_type"] if not pitch_summary.empty else "UNK"
 
     df_lhb = df[df["batter_stand"] == "L"].copy()
     df_rhb = df[df["batter_stand"] == "R"].copy()
 
-    usage_split = (
-        df.groupby(["pitch_type_plot", "batter_stand"])
-        .size()
-        .unstack(fill_value=0)
-        .reindex(index=pitch_summary["pitch_type"].tolist(), fill_value=0)
+    # Rolling CSW by game
+    game_summary = (
+        df.groupby("game_pk")
+        .agg(
+            game_date=("game_date", "min"),
+            pitches=("pitch_event_id", "size"),
+            whiffs=("is_whiff", "sum"),
+            called_strikes=("is_called_strike", "sum"),
+        )
+        .reset_index()
+        .sort_values(["game_date", "game_pk"])
     )
-    for col in ["L", "R"]:
-        if col not in usage_split.columns:
-            usage_split[col] = 0
+    game_summary["csw_pct"] = 100 * (
+        (game_summary["whiffs"] + game_summary["called_strikes"]) / game_summary["pitches"]
+    )
+    game_summary["rolling_csw_5"] = game_summary["csw_pct"].rolling(5, min_periods=1).mean()
 
-    fig = plt.figure(figsize=(15, 11))
-    gs = fig.add_gridspec(3, 2, height_ratios=[1.05, 1.05, 0.95])
+    fig = plt.figure(figsize=(16, 12))
+    gs = fig.add_gridspec(3, 2, height_ratios=[1.0, 1.0, 1.0])
 
-    ax_loc = fig.add_subplot(gs[0, 0])
+    ax_usage = fig.add_subplot(gs[0, 0])
     ax_move = fig.add_subplot(gs[0, 1])
     ax_lhb = fig.add_subplot(gs[1, 0])
     ax_rhb = fig.add_subplot(gs[1, 1])
-    ax_tbl = fig.add_subplot(gs[2, :])
+    ax_trend = fig.add_subplot(gs[2, 0])
+    ax_tbl = fig.add_subplot(gs[2, 1])
 
-    for pt in pitch_types:
-        sub = df[df["pitch_type_plot"] == pt]
-        ax_loc.scatter(
-            sub["plate_x"],
-            sub["plate_z"],
-            label=f"{PITCH_NAME_MAP.get(pt, pt)} ({len(sub)})",
-            color=color_map[pt],
-            s=80,
-            alpha=0.8,
-            edgecolors="black",
-            linewidths=0.3,
-        )
-    draw_zone(ax_loc)
-    ax_loc.set_title("Pitch Location")
-    ax_loc.legend(title="Pitch Type", fontsize=9, loc="upper right")
+    # Pitch mix / usage
+    ax_usage.bar(
+        pitch_summary["pitch_type"],
+        pitch_summary["usage_pct"],
+        color=[color_map.get(pt, "#666666") for pt in pitch_summary["pitch_type"]],
+        edgecolor="black",
+        linewidth=0.5,
+    )
+    ax_usage.set_title("Season Pitch Mix")
+    ax_usage.set_ylabel("Usage %")
+    ax_usage.set_xlabel("Pitch Type")
+    ax_usage.grid(axis="y", alpha=0.15)
 
+    # Movement
     for pt in pitch_types:
         sub = df[df["pitch_type_plot"] == pt]
         ax_move.scatter(
             sub["pfx_x_in"],
             sub["pfx_z_in"],
             color=color_map[pt],
-            s=80,
-            alpha=0.8,
+            s=45,
+            alpha=0.55,
             edgecolors="black",
-            linewidths=0.3,
-            label=pt,
+            linewidths=0.2,
         )
-    ax_move.axhline(0, color="black", linewidth=1)
-    ax_move.axvline(0, color="black", linewidth=1)
-    ax_move.set_title("Movement")
-    ax_move.set_xlabel("Horizontal Break (in.)")
-    ax_move.set_ylabel("Induced Vertical Break (in.)")
-    ax_move.set_xlim(-25, 25)
-    ax_move.set_ylim(-25, 25)
-    ax_move.set_aspect("equal", adjustable="box")
-    ax_move.grid(alpha=0.15)
-
     centroids = df.groupby("pitch_type_plot")[["pfx_x_in", "pfx_z_in"]].mean()
     for pt, row in centroids.iterrows():
         ax_move.text(
@@ -299,35 +291,67 @@ def main():
             va="center",
             color="black",
         )
+    ax_move.axhline(0, color="black", linewidth=1)
+    ax_move.axvline(0, color="black", linewidth=1)
+    ax_move.set_title("Movement Clusters")
+    ax_move.set_xlabel("Horizontal Break (in.)")
+    ax_move.set_ylabel("Induced Vertical Break (in.)")
+    ax_move.set_xlim(-25, 25)
+    ax_move.set_ylim(-25, 25)
+    ax_move.set_aspect("equal", adjustable="box")
+    ax_move.grid(alpha=0.15)
 
+    # Location vs LHB
     for pt in sorted(df_lhb["pitch_type_plot"].dropna().unique()):
         sub = df_lhb[df_lhb["pitch_type_plot"] == pt]
         ax_lhb.scatter(
             sub["plate_x"],
             sub["plate_z"],
             color=color_map[pt],
-            s=80,
-            alpha=0.8,
+            s=45,
+            alpha=0.55,
             edgecolors="black",
-            linewidths=0.3,
+            linewidths=0.2,
         )
     draw_zone(ax_lhb)
-    ax_lhb.set_title("Location vs LHB")
+    ax_lhb.set_title("Season Location vs LHB")
 
+    # Location vs RHB
     for pt in sorted(df_rhb["pitch_type_plot"].dropna().unique()):
         sub = df_rhb[df_rhb["pitch_type_plot"] == pt]
         ax_rhb.scatter(
             sub["plate_x"],
             sub["plate_z"],
             color=color_map[pt],
-            s=80,
-            alpha=0.8,
+            s=45,
+            alpha=0.55,
             edgecolors="black",
-            linewidths=0.3,
+            linewidths=0.2,
         )
     draw_zone(ax_rhb)
-    ax_rhb.set_title("Location vs RHB")
+    ax_rhb.set_title("Season Location vs RHB")
 
+    # Rolling CSW
+    ax_trend.plot(
+        range(len(game_summary)),
+        game_summary["csw_pct"],
+        marker="o",
+        linewidth=1.5,
+        label="Game CSW%",
+    )
+    ax_trend.plot(
+        range(len(game_summary)),
+        game_summary["rolling_csw_5"],
+        linewidth=2.5,
+        label="Rolling 5G CSW%",
+    )
+    ax_trend.set_title("Rolling CSW% by Game")
+    ax_trend.set_xlabel("Game Sequence")
+    ax_trend.set_ylabel("CSW%")
+    ax_trend.grid(alpha=0.15)
+    ax_trend.legend()
+
+    # Table
     ax_tbl.axis("off")
     tbl_df = pitch_summary[
         [
@@ -335,6 +359,7 @@ def main():
             "pitches",
             "usage_pct",
             "avg_velo",
+            "max_velo",
             "avg_ivb",
             "avg_hb",
             "zone_pct",
@@ -345,7 +370,7 @@ def main():
     ].copy()
     tbl_df = format_table_df(tbl_df)
 
-    col_labels = ["Type", "#", "Usage%", "Velo", "IVB", "HB", "Zone%", "Strike%", "Whiff%", "CSW%"]
+    col_labels = ["Type", "#", "Usage%", "AvgV", "MaxV", "IVB", "HB", "Zone%", "Strike%", "Whiff%", "CSW%"]
     table = ax_tbl.table(
         cellText=tbl_df.values,
         colLabels=col_labels,
@@ -353,26 +378,14 @@ def main():
         cellLoc="center",
     )
     table.auto_set_font_size(False)
-    table.set_fontsize(10)
-    table.scale(1, 1.6)
-    ax_tbl.set_title("Pitch Type Metrics", pad=12)
+    table.set_fontsize(9)
+    table.scale(1.05, 1.5)
+    ax_tbl.set_title("Season Pitch Metrics", pad=12)
 
     for row_idx, pitch_type in enumerate(tbl_df["pitch_type"], start=1):
         table[(row_idx, 0)].set_text_props(color=color_map.get(pitch_type, "#666666"), weight="bold")
 
-    usage_lines = []
-    for pitch_type in pitch_summary["pitch_type"]:
-        l_count = int(usage_split.loc[pitch_type, "L"]) if pitch_type in usage_split.index else 0
-        r_count = int(usage_split.loc[pitch_type, "R"]) if pitch_type in usage_split.index else 0
-        l_total = max(len(df_lhb), 1)
-        r_total = max(len(df_rhb), 1)
-        l_pct = round(100 * l_count / l_total, 1) if len(df_lhb) else 0.0
-        r_pct = round(100 * r_count / r_total, 1) if len(df_rhb) else 0.0
-        usage_lines.append(f"{pitch_type}: vs LHB {l_pct}% | vs RHB {r_pct}%")
-
-    primary_pitch = pitch_summary.iloc[0]["pitch_type"] if not pitch_summary.empty else "UNK"
-
-    title = f"{pitcher_name} Report\nGame {game_pk} | {game_date}"
+    title = f"{pitcher_name} Season Report | {season}"
     fig.suptitle(title, fontsize=22, y=0.985)
 
     fig.text(
@@ -385,6 +398,7 @@ def main():
     )
 
     header_parts = [
+        f"Games: {total_games}",
         f"Pitches: {total_pitches}",
         f"Whiffs: {whiffs}",
         f"Called Strikes: {called_strikes}",
@@ -405,18 +419,9 @@ def main():
         bbox=dict(boxstyle="round,pad=0.35", facecolor="white", edgecolor="gray", alpha=0.95),
     )
 
-    fig.text(
-        0.5,
-        0.895,
-        "   ".join(usage_lines[:4]),
-        ha="center",
-        va="center",
-        fontsize=9,
-    )
+    plt.tight_layout(rect=[0, 0, 1, 0.90])
 
-    plt.tight_layout(rect=[0, 0, 1, 0.87])
-
-    output_file = OUT_DIR / f"pitcher_report_{pitcher_id}_{game_pk}.png"
+    output_file = OUT_DIR / f"pitcher_season_report_{pitcher_id}_{season}.png"
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     plt.close()
 
