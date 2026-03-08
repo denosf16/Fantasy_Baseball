@@ -1,0 +1,6 @@
+-- Chart-ready marts / views
+-- Initial placeholders. We will define these in detail after clean tables are ready.
+
+-- Example:
+-- CREATE VIEW mart.pitcher_game_chart_input AS ...
+-- CREATE VIEW mart.hitter_game_chart_input AS ...

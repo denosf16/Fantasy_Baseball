@@ -1,0 +1,23 @@
+project:
+  name: fantasy_baseball
+  environment: dev
+
+paths:
+  base_dir: C:/Repos/Public_Projects_Clean/Fantasy_Baseball
+  raw_data: C:/Repos/Public_Projects_Clean/Fantasy_Baseball/data/raw
+  processed_data: C:/Repos/Public_Projects_Clean/Fantasy_Baseball/data/processed
+  cache_data: C:/Repos/Public_Projects_Clean/Fantasy_Baseball/data/cache
+  pdf_output: C:/Repos/Public_Projects_Clean/Fantasy_Baseball/outputs/pdf
+  png_output: C:/Repos/Public_Projects_Clean/Fantasy_Baseball/outputs/png
+  logs: C:/Repos/Public_Projects_Clean/Fantasy_Baseball/logs
+
+sql:
+  schemas:
+    raw: raw
+    clean: clean
+    mart: mart
+
+mlb:
+  start_season: 2025
+  statcast_start_date: 2025-03-01
+  statcast_end_date: 2025-03-31

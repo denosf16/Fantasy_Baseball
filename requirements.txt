@@ -1,0 +1,11 @@
+pandas
+numpy
+requests
+pyodbc
+sqlalchemy
+python-dotenv
+pyyaml
+pybaseball
+jupyter
+matplotlib
+plotly

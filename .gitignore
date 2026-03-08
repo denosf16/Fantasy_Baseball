@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment / secrets
+config/connections.env
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+logs/
+*.log
+
+# Data outputs
+outputs/pdf/*.pdf
+outputs/png/*.png
+
+# Local data
+data/raw/*
+data/processed/*
+data/cache/*
+
+# Keep folder structure
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/cache/.gitkeep
+!logs/.gitkeep
+!outputs/pdf/.gitkeep
+!outputs/png/.gitkeep
