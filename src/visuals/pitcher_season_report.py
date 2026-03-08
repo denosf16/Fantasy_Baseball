@@ -1,4 +1,5 @@
 from pathlib import Path
+import math
 import sys
 import urllib
 
@@ -83,7 +84,7 @@ def draw_zone(ax) -> None:
         zone_width,
         zone_height,
         fill=False,
-        linewidth=2.0,
+        linewidth=1.5,
         edgecolor="black",
     )
     ax.add_patch(strike_zone)
@@ -93,15 +94,15 @@ def draw_zone(ax) -> None:
             [zone_left + i * (zone_width / 3), zone_left + i * (zone_width / 3)],
             [zone_bottom, zone_bottom + zone_height],
             color="black",
-            linewidth=0.8,
-            alpha=0.5,
+            linewidth=0.6,
+            alpha=0.45,
         )
         ax.plot(
             [zone_left, zone_left + zone_width],
             [zone_bottom + i * (zone_height / 3), zone_bottom + i * (zone_height / 3)],
             color="black",
-            linewidth=0.8,
-            alpha=0.5,
+            linewidth=0.6,
+            alpha=0.45,
         )
 
     home_plate = Polygon(
@@ -114,15 +115,13 @@ def draw_zone(ax) -> None:
         ],
         closed=True,
         fill=False,
-        linewidth=2.0,
+        linewidth=1.5,
         edgecolor="black",
     )
     ax.add_patch(home_plate)
 
     ax.set_xlim(2.2, -2.2)
     ax.set_ylim(-0.5, 4.8)
-    ax.set_xlabel("Plate X")
-    ax.set_ylabel("Plate Z")
     ax.grid(alpha=0.12)
 
 
@@ -130,13 +129,13 @@ def draw_kde(ax, df: pd.DataFrame, title: str) -> None:
     draw_zone(ax)
 
     if df.empty or df["plate_x"].dropna().empty or df["plate_z"].dropna().empty:
-        ax.set_title(title)
-        ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+        ax.set_title(title, fontsize=10)
+        ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes, fontsize=9)
         return
 
     if len(df) < 3 or df["plate_x"].nunique() < 2 or df["plate_z"].nunique() < 2:
-        ax.set_title(title)
-        ax.text(0.5, 0.5, "Not enough data", ha="center", va="center", transform=ax.transAxes)
+        ax.set_title(title, fontsize=10)
+        ax.text(0.5, 0.5, "Not enough data", ha="center", va="center", transform=ax.transAxes, fontsize=9)
         return
 
     sns.kdeplot(
@@ -154,7 +153,7 @@ def draw_kde(ax, df: pd.DataFrame, title: str) -> None:
     )
 
     draw_zone(ax)
-    ax.set_title(title)
+    ax.set_title(title, fontsize=10)
 
 
 def build_pitch_summary(df: pd.DataFrame) -> pd.DataFrame:
@@ -212,6 +211,44 @@ def format_table_df(tbl_df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def add_pitchtype_heatmap_grid(fig, subspec, handed_df: pd.DataFrame, pitch_order: list[str], side_label: str) -> None:
+    n = len(pitch_order)
+    ncols = min(3, max(1, n))
+    nrows = math.ceil(n / ncols)
+
+    subgs = subspec.subgridspec(nrows, ncols, wspace=0.18, hspace=0.30)
+
+    for idx, pitch_type in enumerate(pitch_order):
+        r = idx // ncols
+        c = idx % ncols
+        ax = fig.add_subplot(subgs[r, c])
+
+        sub = handed_df[handed_df["pitch_type_plot"] == pitch_type].copy()
+        title = f"{pitch_type} | {PITCH_NAME_MAP.get(pitch_type, pitch_type)}\nN={len(sub)}"
+        draw_kde(ax, sub, title)
+
+        if r < nrows - 1:
+            ax.set_xlabel("")
+        else:
+            ax.set_xlabel("plate_x", fontsize=9)
+
+        if c > 0:
+            ax.set_ylabel("")
+        else:
+            ax.set_ylabel("plate_z", fontsize=9)
+
+    total_slots = nrows * ncols
+    for idx in range(n, total_slots):
+        r = idx // ncols
+        c = idx % ncols
+        ax = fig.add_subplot(subgs[r, c])
+        ax.axis("off")
+
+    title_ax = fig.add_subplot(subspec)
+    title_ax.axis("off")
+    title_ax.set_title(f"Location Density {side_label} by Pitch Type", fontsize=12, pad=8)
+
+
 def main():
     if len(sys.argv) >= 3:
         pitcher_id = int(sys.argv[1])
@@ -241,6 +278,9 @@ def main():
     df["pfx_x_in"] = df["pfx_x"] * 12
     df["pfx_z_in"] = df["pfx_z"] * 12
 
+    pitch_summary = build_pitch_summary(df)
+    pitch_order = pitch_summary["pitch_type"].tolist()
+
     pitch_types = sorted(df["pitch_type_plot"].unique())
     color_map = get_pitch_colors(pitch_types)
 
@@ -254,7 +294,6 @@ def main():
     avg_velo = round(df["release_speed"].dropna().mean(), 1) if df["release_speed"].notna().any() else None
     zone_pct = round(100 * df["in_zone"].mean(), 1) if total_pitches else 0
 
-    pitch_summary = build_pitch_summary(df)
     primary_pitch = pitch_summary.iloc[0]["pitch_type"] if not pitch_summary.empty else "UNK"
 
     df_lhb = df[df["batter_stand"] == "L"].copy()
@@ -276,16 +315,17 @@ def main():
     )
     game_summary["rolling_csw_5"] = game_summary["csw_pct"].rolling(5, min_periods=1).mean()
 
-    fig = plt.figure(figsize=(16, 12))
-    gs = fig.add_gridspec(3, 2, height_ratios=[1.0, 1.0, 1.0])
+    fig = plt.figure(figsize=(18, 16))
+    gs = fig.add_gridspec(4, 2, height_ratios=[1.0, 1.15, 1.15, 0.95], hspace=0.35, wspace=0.18)
 
     ax_usage = fig.add_subplot(gs[0, 0])
     ax_move = fig.add_subplot(gs[0, 1])
-    ax_lhb = fig.add_subplot(gs[1, 0])
-    ax_rhb = fig.add_subplot(gs[1, 1])
-    ax_trend = fig.add_subplot(gs[2, 0])
-    ax_tbl = fig.add_subplot(gs[2, 1])
+    lhb_spec = gs[1:3, 0]
+    rhb_spec = gs[1:3, 1]
+    ax_trend = fig.add_subplot(gs[3, 0])
+    ax_tbl = fig.add_subplot(gs[3, 1])
 
+    # Pitch mix
     ax_usage.bar(
         pitch_summary["pitch_type"],
         pitch_summary["usage_pct"],
@@ -298,12 +338,13 @@ def main():
     ax_usage.set_xlabel("Pitch Type")
     ax_usage.grid(axis="y", alpha=0.15)
 
-    for pt in pitch_types:
+    # Movement
+    for pt in pitch_order:
         sub = df[df["pitch_type_plot"] == pt]
         ax_move.scatter(
             sub["pfx_x_in"],
             sub["pfx_z_in"],
-            color=color_map[pt],
+            color=color_map.get(pt, "#666666"),
             s=45,
             alpha=0.55,
             edgecolors="black",
@@ -333,9 +374,11 @@ def main():
     ax_move.set_aspect("equal", adjustable="box")
     ax_move.grid(alpha=0.15)
 
-    draw_kde(ax_lhb, df_lhb, "Season Location Density vs LHB")
-    draw_kde(ax_rhb, df_rhb, "Season Location Density vs RHB")
+    # Heatmap grids by pitch type
+    add_pitchtype_heatmap_grid(fig, lhb_spec, df_lhb, pitch_order, "vs LHB")
+    add_pitchtype_heatmap_grid(fig, rhb_spec, df_rhb, pitch_order, "vs RHB")
 
+    # Rolling CSW
     ax_trend.plot(
         range(len(game_summary)),
         game_summary["csw_pct"],
@@ -355,6 +398,7 @@ def main():
     ax_trend.grid(alpha=0.15)
     ax_trend.legend()
 
+    # Table
     ax_tbl.axis("off")
     tbl_df = pitch_summary[
         [
@@ -422,7 +466,7 @@ def main():
         bbox=dict(boxstyle="round,pad=0.35", facecolor="white", edgecolor="gray", alpha=0.95),
     )
 
-    fig.subplots_adjust(top=0.90, bottom=0.05, left=0.05, right=0.98, hspace=0.32, wspace=0.22)
+    fig.subplots_adjust(top=0.90, bottom=0.05, left=0.05, right=0.98, hspace=0.34, wspace=0.22)
 
     output_file = OUT_DIR / f"pitcher_season_report_{pitcher_id}_{season}.png"
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
