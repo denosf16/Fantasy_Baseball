@@ -10,7 +10,7 @@ from src.queries.statcast_queries import get_hitter_game
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-OUT_DIR = BASE_DIR / "outputs" / "png"
+OUT_DIR = BASE_DIR / "outputs" / "png" / "hitters" / "game"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 PITCH_COLORS = {
