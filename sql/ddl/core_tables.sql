@@ -1,58 +1,92 @@
 USE fantasy_baseball;
 GO
 
-IF OBJECT_ID('clean.teams', 'U') IS NOT NULL
-    DROP TABLE clean.teams;
+SET NOCOUNT ON;
 GO
 
-CREATE TABLE clean.teams (
-    team_id              INT           NOT NULL PRIMARY KEY,
-    team_name            NVARCHAR(100) NULL,
-    team_code            NVARCHAR(20)  NULL,
-    abbreviation         NVARCHAR(10)  NULL,
-    league_name          NVARCHAR(50)  NULL,
-    division_name        NVARCHAR(50)  NULL,
-    active_flag          BIT           NULL,
-    source_system        NVARCHAR(50)  NULL,
-    source_load_datetime DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME()
+/* ===========================
+   TEAMS
+=========================== */
+
+IF OBJECT_ID('core.teams', 'U') IS NOT NULL
+    DROP TABLE core.teams;
+GO
+
+CREATE TABLE core.teams (
+
+    team_id NVARCHAR(10) NOT NULL,
+    team_name NVARCHAR(100) NULL,
+
+    CONSTRAINT PK_core_teams
+        PRIMARY KEY CLUSTERED (team_id)
+
 );
 GO
 
-IF OBJECT_ID('clean.players', 'U') IS NOT NULL
-    DROP TABLE clean.players;
+
+/* ===========================
+   PLAYERS
+=========================== */
+
+IF OBJECT_ID('core.players', 'U') IS NOT NULL
+    DROP TABLE core.players;
 GO
 
-CREATE TABLE clean.players (
-    player_id            INT            NOT NULL PRIMARY KEY,
-    full_name            NVARCHAR(150)  NULL,
-    first_name           NVARCHAR(100)  NULL,
-    last_name            NVARCHAR(100)  NULL,
-    primary_position     NVARCHAR(20)   NULL,
-    bat_side             NVARCHAR(10)   NULL,
-    pitch_hand           NVARCHAR(10)   NULL,
-    current_team_id      INT            NULL,
-    active_flag          BIT            NULL,
-    source_system        NVARCHAR(50)   NULL,
-    source_load_datetime DATETIME2      NOT NULL DEFAULT SYSUTCDATETIME()
+CREATE TABLE core.players (
+
+    player_id BIGINT NOT NULL,
+    player_name NVARCHAR(200) NULL,
+
+    bats NVARCHAR(5) NULL,
+    throws NVARCHAR(5) NULL,
+
+    CONSTRAINT PK_core_players
+        PRIMARY KEY CLUSTERED (player_id)
+
 );
 GO
 
-IF OBJECT_ID('clean.games', 'U') IS NOT NULL
-    DROP TABLE clean.games;
+
+/* ===========================
+   GAMES
+=========================== */
+
+IF OBJECT_ID('core.games', 'U') IS NOT NULL
+    DROP TABLE core.games;
 GO
 
-CREATE TABLE clean.games (
-    game_pk              INT            NOT NULL PRIMARY KEY,
-    game_date            DATE           NULL,
-    season               INT            NULL,
-    game_type            NVARCHAR(10)   NULL,
-    status_detailed      NVARCHAR(100)  NULL,
-    home_team_id         INT            NULL,
-    away_team_id         INT            NULL,
-    home_score           INT            NULL,
-    away_score           INT            NULL,
-    venue_name           NVARCHAR(150)  NULL,
-    source_system        NVARCHAR(50)   NULL,
-    source_load_datetime DATETIME2      NOT NULL DEFAULT SYSUTCDATETIME()
+CREATE TABLE core.games (
+
+    game_pk INT NOT NULL,
+
+    game_date DATE NULL,
+    game_type NVARCHAR(10) NULL,
+    season INT NULL,
+
+    home_team NVARCHAR(10) NULL,
+    away_team NVARCHAR(10) NULL,
+
+    home_score INT NULL,
+    away_score INT NULL,
+
+    CONSTRAINT PK_core_games
+        PRIMARY KEY CLUSTERED (game_pk)
+
 );
+GO
+
+
+/* ===========================
+   INDEXES
+=========================== */
+
+CREATE NONCLUSTERED INDEX IX_core_games_date
+    ON core.games (game_date);
+
+CREATE NONCLUSTERED INDEX IX_core_players_name
+    ON core.players (player_name);
+
+GO
+
+PRINT 'Tables created: core.teams, core.players, core.games';
 GO

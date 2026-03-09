@@ -39,8 +39,8 @@ def main():
     df = df.copy()
     df["pitch_type_plot"] = df["pitch_type"].fillna("UNK")
     df["in_zone"] = df["zone"].apply(classify_in_zone).astype(int)
-    df["pfx_x_in"] = df["pfx_x"] * 12
-    df["pfx_z_in"] = df["pfx_z"] * 12
+    df["pfx_x_in"] = pd.to_numeric(df["pfx_x"], errors="coerce") * 12
+    df["pfx_z_in"] = pd.to_numeric(df["pfx_z"], errors="coerce") * 12
 
     pitch_summary = build_pitch_summary_pitcher(df)
     pitch_order = pitch_summary["pitch_type"].tolist()
@@ -48,17 +48,37 @@ def main():
     pitch_types = sorted(df["pitch_type_plot"].unique())
     color_map = get_pitch_colors(pitch_types)
 
-    pitcher_name = df["pitcher_name"].dropna().iloc[0]
+    pitcher_name = (
+        df["pitcher_name"].dropna().iloc[0]
+        if "pitcher_name" in df.columns and df["pitcher_name"].notna().any()
+        else str(pitcher_id)
+    )
     game_date = build_title_date(df["game_date"].iloc[0])
 
     total_pitches = len(df)
     whiffs = int(df["is_whiff"].fillna(0).sum())
     called_strikes = int(df["is_called_strike"].fillna(0).sum())
+    balls_in_play = int(df["is_in_play"].fillna(0).sum())
     csw = whiffs + called_strikes
     csw_pct = round(100 * csw / total_pitches, 1) if total_pitches else 0
     avg_velo = (
         round(df["release_speed"].dropna().mean(), 1)
         if df["release_speed"].notna().any()
+        else None
+    )
+    avg_spin = (
+        round(df["release_spin_rate"].dropna().mean(), 0)
+        if "release_spin_rate" in df.columns and df["release_spin_rate"].notna().any()
+        else None
+    )
+    avg_extension = (
+        round(df["release_extension"].dropna().mean(), 2)
+        if "release_extension" in df.columns and df["release_extension"].notna().any()
+        else None
+    )
+    avg_spin_axis = (
+        round(df["spin_axis"].dropna().mean(), 0)
+        if "spin_axis" in df.columns and df["spin_axis"].notna().any()
         else None
     )
     zone_pct = round(100 * df["in_zone"].mean(), 1) if total_pitches else 0
@@ -93,6 +113,7 @@ def main():
     rhb_spec = gs[1:3, 1]
     ax_tbl = fig.add_subplot(gs[3, :])
 
+    # Pitch location
     for pt in pitch_order:
         sub = df[df["pitch_type_plot"] == pt]
         ax_loc.scatter(
@@ -105,12 +126,14 @@ def main():
             edgecolors="black",
             linewidths=0.3,
         )
+
     draw_zone(ax_loc)
-    ax_loc.set_title("Pitch Location", fontsize=12)
+    ax_loc.set_title("Pitch Location")
     ax_loc.set_xlabel("Plate X")
     ax_loc.set_ylabel("Plate Z")
     ax_loc.legend(title="Pitch Type", fontsize=8, loc="upper right")
 
+    # Movement clusters
     for pt in pitch_order:
         sub = df[df["pitch_type_plot"] == pt]
         ax_move.scatter(
@@ -122,9 +145,10 @@ def main():
             edgecolors="black",
             linewidths=0.3,
         )
+
     ax_move.axhline(0, color="black", linewidth=1)
     ax_move.axvline(0, color="black", linewidth=1)
-    ax_move.set_title("Movement", fontsize=12)
+    ax_move.set_title("Movement")
     ax_move.set_xlabel("Horizontal Break (in.)")
     ax_move.set_ylabel("Induced Vertical Break (in.)")
     ax_move.set_xlim(-25, 25)
@@ -145,9 +169,11 @@ def main():
             color="black",
         )
 
+    # Heatmaps by handedness
     add_pitchtype_heatmap_grid(fig, lhb_spec, df_lhb, pitch_order, "vs LHB", min_points=3)
     add_pitchtype_heatmap_grid(fig, rhb_spec, df_rhb, pitch_order, "vs RHB", min_points=3)
 
+    # Table
     ax_tbl.axis("off")
     tbl_df = pitch_summary[
         [
@@ -155,6 +181,7 @@ def main():
             "pitches",
             "usage_pct",
             "avg_velo",
+            "max_velo",
             "avg_ivb",
             "avg_hb",
             "zone_pct",
@@ -169,6 +196,7 @@ def main():
         round_cols=[
             "usage_pct",
             "avg_velo",
+            "max_velo",
             "avg_ivb",
             "avg_hb",
             "zone_pct",
@@ -182,7 +210,8 @@ def main():
         "Type",
         "#",
         "Usage%",
-        "Velo",
+        "AvgV",
+        "MaxV",
         "IVB",
         "HB",
         "Zone%",
@@ -197,9 +226,9 @@ def main():
         cellLoc="center",
     )
     table.auto_set_font_size(False)
-    table.set_fontsize(10)
-    table.scale(1, 1.6)
-    ax_tbl.set_title("Pitch Type Metrics", pad=12, fontsize=12)
+    table.set_fontsize(9.5)
+    table.scale(1, 1.55)
+    ax_tbl.set_title("Pitch Type Metrics", pad=12)
 
     for row_idx, pitch_type in enumerate(tbl_df["pitch_type"], start=1):
         table[(row_idx, 0)].set_text_props(
@@ -233,11 +262,19 @@ def main():
         f"Pitches: {total_pitches}",
         f"Whiffs: {whiffs}",
         f"Called Strikes: {called_strikes}",
+        f"BIP: {balls_in_play}",
         f"CSW%: {csw_pct}",
         f"Zone%: {zone_pct}",
     ]
     if avg_velo is not None:
         header_parts.append(f"Avg Velo: {avg_velo}")
+    if avg_spin is not None:
+        header_parts.append(f"Avg Spin: {int(avg_spin)}")
+    if avg_extension is not None:
+        header_parts.append(f"Ext: {avg_extension}")
+    if avg_spin_axis is not None:
+        header_parts.append(f"Axis: {int(avg_spin_axis)}")
+
     header_text = " | ".join(header_parts)
 
     fig.text(
@@ -246,7 +283,7 @@ def main():
         header_text,
         ha="center",
         va="center",
-        fontsize=11,
+        fontsize=10.5,
         bbox=dict(
             boxstyle="round,pad=0.35",
             facecolor="white",

@@ -1,8 +1,48 @@
-IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'raw')
-    EXEC('CREATE SCHEMA raw');
+USE fantasy_baseball;
+GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'clean')
-    EXEC('CREATE SCHEMA clean');
+SET NOCOUNT ON;
+GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'mart')
-    EXEC('CREATE SCHEMA mart');
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.schemas
+    WHERE name = 'raw'
+)
+BEGIN
+    EXEC ('CREATE SCHEMA raw');
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.schemas
+    WHERE name = 'clean'
+)
+BEGIN
+    EXEC ('CREATE SCHEMA clean');
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.schemas
+    WHERE name = 'core'
+)
+BEGIN
+    EXEC ('CREATE SCHEMA core');
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.schemas
+    WHERE name = 'mart'
+)
+BEGIN
+    EXEC ('CREATE SCHEMA mart');
+END;
+GO
+
+PRINT 'Schemas verified: raw, clean, core, mart';
+GO

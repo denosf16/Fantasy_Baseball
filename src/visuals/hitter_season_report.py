@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from src.db_connect import engine
 from src.queries.statcast_queries import get_hitter_season
 from src.utils.pitch_config import PITCH_NAME_MAP, get_pitch_colors
+from src.utils.plot_helpers import draw_spray_chart
 from src.utils.report_helpers import (
     classify_in_zone,
     build_pitch_summary_hitter,
@@ -61,6 +62,7 @@ def main():
     in_zone_total = int(df["in_zone"].fillna(0).sum())
     out_zone_total = total_pitches_seen - in_zone_total
     chase_swings_total = int(df["is_chase_swing"].fillna(0).sum())
+    balls_in_play = int(df["is_in_play"].fillna(0).sum())
 
     zone_pct_total = round(100 * in_zone_total / total_pitches_seen, 1) if total_pitches_seen else 0
     swing_pct_total = round(100 * swings / total_pitches_seen, 1) if total_pitches_seen else 0
@@ -86,6 +88,18 @@ def main():
     avg_velo_seen = (
         round(df["release_speed"].dropna().mean(), 1)
         if df["release_speed"].notna().any()
+        else None
+    )
+    avg_xba = (
+        round(df["estimated_ba_using_speedangle"].dropna().mean(), 3)
+        if "estimated_ba_using_speedangle" in df.columns
+        and df["estimated_ba_using_speedangle"].notna().any()
+        else None
+    )
+    avg_xwoba = (
+        round(df["estimated_woba_using_speedangle"].dropna().mean(), 3)
+        if "estimated_woba_using_speedangle" in df.columns
+        and df["estimated_woba_using_speedangle"].notna().any()
         else None
     )
 
@@ -119,22 +133,24 @@ def main():
 
     game_summary = build_game_trend_summary_hitter(df)
 
-    fig = plt.figure(figsize=(18, 16))
+    fig = plt.figure(figsize=(18, 17))
     gs = fig.add_gridspec(
-        4,
+        5,
         2,
-        height_ratios=[1.0, 1.15, 1.15, 0.95],
+        height_ratios=[1.0, 1.05, 1.15, 1.15, 1.0],
         hspace=0.35,
         wspace=0.18,
     )
 
     ax_usage = fig.add_subplot(gs[0, 0])
     ax_evla = fig.add_subplot(gs[0, 1])
-    rhp_spec = gs[1:3, 0]
-    lhp_spec = gs[1:3, 1]
-    ax_trend = fig.add_subplot(gs[3, 0])
-    ax_tbl = fig.add_subplot(gs[3, 1])
+    ax_spray = fig.add_subplot(gs[1, 0])
+    ax_trend = fig.add_subplot(gs[1, 1])
+    rhp_spec = gs[2:4, 0]
+    lhp_spec = gs[2:4, 1]
+    ax_tbl = fig.add_subplot(gs[4, :])
 
+    # Pitch mix seen
     ax_usage.bar(
         pitch_summary["pitch_type"],
         pitch_summary["pitches_seen"],
@@ -147,6 +163,7 @@ def main():
     ax_usage.set_xlabel("Pitch Type")
     ax_usage.grid(axis="y", alpha=0.15)
 
+    # EV / LA
     ax_evla.set_title("Season Exit Velocity vs Launch Angle")
     valid_evla = bip_df[
         bip_df["launch_speed"].notna() & bip_df["launch_angle"].notna()
@@ -177,9 +194,10 @@ def main():
     ax_evla.set_ylabel("Exit Velocity")
     ax_evla.grid(alpha=0.15)
 
-    add_pitchtype_heatmap_grid(fig, rhp_spec, df_rhp, pitch_order_rhp, "vs RHP", min_points=5)
-    add_pitchtype_heatmap_grid(fig, lhp_spec, df_lhp, pitch_order_lhp, "vs LHP", min_points=5)
+    # Spray chart
+    draw_spray_chart(ax_spray, bip_df, title="Season Spray Chart")
 
+    # Rolling contact trend
     ax_trend.set_title("Rolling Contact by Game")
     ax_trend.set_xlabel("Game Sequence")
     ax_trend.set_ylabel("Contact %")
@@ -212,6 +230,11 @@ def main():
         )
         ax_trend.grid(alpha=0.15)
 
+    # Heatmaps
+    add_pitchtype_heatmap_grid(fig, rhp_spec, df_rhp, pitch_order_rhp, "vs RHP", min_points=5)
+    add_pitchtype_heatmap_grid(fig, lhp_spec, df_lhp, pitch_order_lhp, "vs LHP", min_points=5)
+
+    # Table
     ax_tbl.axis("off")
     tbl_df = pitch_summary[
         [
@@ -271,7 +294,7 @@ def main():
     )
     table.auto_set_font_size(False)
     table.set_fontsize(9)
-    table.scale(1.1, 1.5)
+    table.scale(1.1, 1.45)
     ax_tbl.set_title("Season Pitch Type Results", pad=12)
 
     for row_idx, pitch_type in enumerate(tbl_df["pitch_type"], start=1):
@@ -286,6 +309,9 @@ def main():
     summary_parts = [
         f"Games: {total_games}",
         f"Pitches Seen: {total_pitches_seen}",
+        f"Swings: {swings}",
+        f"Whiffs: {whiffs}",
+        f"Balls in Play: {balls_in_play}",
         f"Swing%: {swing_pct_total}",
         f"Whiff%: {whiff_pct_total}",
         f"Contact%: {contact_pct_total}",
@@ -300,12 +326,16 @@ def main():
         summary_parts.append(f"Max EV: {max_ev}")
     if avg_la is not None:
         summary_parts.append(f"Avg LA: {avg_la}")
+    if avg_xba is not None:
+        summary_parts.append(f"Avg xBA: {avg_xba}")
+    if avg_xwoba is not None:
+        summary_parts.append(f"Avg xwOBA: {avg_xwoba}")
 
     summary_text = " | ".join(summary_parts)
 
     fig.text(
         0.5,
-        0.945,
+        0.948,
         summary_text,
         ha="center",
         va="center",
@@ -319,7 +349,7 @@ def main():
     )
 
     fig.subplots_adjust(
-        top=0.90,
+        top=0.91,
         bottom=0.05,
         left=0.05,
         right=0.98,

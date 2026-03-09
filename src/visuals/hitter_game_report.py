@@ -55,6 +55,9 @@ def main():
     called_strikes = int(df["is_called_strike"].fillna(0).sum())
     balls_in_play = int(df["is_in_play"].fillna(0).sum())
     zone_pct_total = round(100 * df["in_zone"].mean(), 1) if total_pitches_seen else 0
+    swing_pct_total = round(100 * swings / total_pitches_seen, 1) if total_pitches_seen else 0
+    whiff_pct_total = round(100 * whiffs / swings, 1) if swings else 0
+    contact_pct_total = round(100 * (swings - whiffs) / swings, 1) if swings else 0
 
     avg_ev = (
         round(df["launch_speed"].dropna().mean(), 1)
@@ -71,6 +74,18 @@ def main():
         if df["launch_angle"].notna().any()
         else None
     )
+    avg_xba = (
+        round(df["estimated_ba_using_speedangle"].dropna().mean(), 3)
+        if "estimated_ba_using_speedangle" in df.columns
+        and df["estimated_ba_using_speedangle"].notna().any()
+        else None
+    )
+    avg_xwoba = (
+        round(df["estimated_woba_using_speedangle"].dropna().mean(), 3)
+        if "estimated_woba_using_speedangle" in df.columns
+        and df["estimated_woba_using_speedangle"].notna().any()
+        else None
+    )
 
     bip_df = df[df["is_in_play"] == 1].copy()
     pitch_summary = build_pitch_summary_hitter(df)
@@ -81,9 +96,10 @@ def main():
     ax_loc = fig.add_subplot(gs[0, 0])
     ax_evla = fig.add_subplot(gs[0, 1])
     ax_spray = fig.add_subplot(gs[1, 0])
-    ax_zone = fig.add_subplot(gs[1, 1])
+    ax_summary = fig.add_subplot(gs[1, 1])
     ax_tbl = fig.add_subplot(gs[2, :])
 
+    # Pitch location seen
     for pt in pitch_summary["pitch_type"]:
         sub = df[df["pitch_type_plot"] == pt]
         ax_loc.scatter(
@@ -96,12 +112,14 @@ def main():
             edgecolors="black",
             linewidths=0.3,
         )
+
     draw_zone(ax_loc)
     ax_loc.set_title("Pitch Location Seen")
     ax_loc.set_xlabel("Plate X")
     ax_loc.set_ylabel("Plate Z")
     ax_loc.legend(title="Pitch Type", fontsize=8, loc="upper right")
 
+    # EV / LA
     ax_evla.set_title("Exit Velocity vs Launch Angle")
     valid_evla = bip_df[
         bip_df["launch_speed"].notna() & bip_df["launch_angle"].notna()
@@ -132,41 +150,54 @@ def main():
     ax_evla.set_ylabel("Exit Velocity")
     ax_evla.grid(alpha=0.15)
 
+    # Real Statcast spray chart if hc_x / hc_y are present
     draw_spray_chart(ax_spray, bip_df, title="Spray Chart")
 
+    # Game summary
     summary_box = pd.DataFrame(
         {
             "Metric": [
                 "Pitches Seen",
                 "Swings",
+                "Swing%",
                 "Whiffs",
+                "Whiff%",
+                "Contact%",
                 "Called Strikes",
                 "Balls in Play",
                 "Zone%",
+                "Avg xBA",
+                "Avg xwOBA",
             ],
             "Value": [
                 total_pitches_seen,
                 swings,
+                swing_pct_total,
                 whiffs,
+                whiff_pct_total,
+                contact_pct_total,
                 called_strikes,
                 balls_in_play,
                 zone_pct_total,
+                avg_xba if avg_xba is not None else "-",
+                avg_xwoba if avg_xwoba is not None else "-",
             ],
         }
     )
 
-    ax_zone.axis("off")
-    zone_table = ax_zone.table(
+    ax_summary.axis("off")
+    summary_table = ax_summary.table(
         cellText=summary_box.values,
         colLabels=summary_box.columns,
         loc="center",
         cellLoc="center",
     )
-    zone_table.auto_set_font_size(False)
-    zone_table.set_fontsize(11)
-    zone_table.scale(1, 1.8)
-    ax_zone.set_title("Game Summary")
+    summary_table.auto_set_font_size(False)
+    summary_table.set_fontsize(10.5)
+    summary_table.scale(1, 1.6)
+    ax_summary.set_title("Game Summary")
 
+    # Pitch-type results
     ax_tbl.axis("off")
     tbl_df = pitch_summary[
         [
