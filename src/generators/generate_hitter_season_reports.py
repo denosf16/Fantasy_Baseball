@@ -1,14 +1,9 @@
-from pathlib import Path
 import sys
 
 import pandas as pd
 
 from src.db_connect import engine
-from src.queries.statcast_queries import get_hitter_games_in_season
 from src.visuals.hitter_season_report import main as hitter_season_report_main
-
-
-BASE_DIR = Path(__file__).resolve().parents[2]
 
 
 def get_hitters_in_season(season: int) -> pd.DataFrame:
@@ -27,6 +22,13 @@ def get_hitters_in_season(season: int) -> pd.DataFrame:
 def generate_reports(season: int) -> None:
     """
     Generate hitter season reports for every hitter in a given season.
+
+    This script is an orchestrator only.
+    The individual hitter_season_report script is responsible for:
+        - querying data
+        - building the chart
+        - routing the output path
+        - saving the PNG
     """
 
     hitters = get_hitters_in_season(season)
@@ -35,31 +37,33 @@ def generate_reports(season: int) -> None:
         print(f"No hitters found for season {season}")
         return
 
-    print(f"\nFound {len(hitters)} hitters for season {season}\n")
+    hitters = hitters.copy()
+
+    if "batter_name" in hitters.columns:
+        hitters = hitters.sort_values(["batter_name", "batter_id"], na_position="last")
+    else:
+        hitters = hitters.sort_values(["batter_id"])
+
+    total_hitters = len(hitters)
+
+    print(f"\nFound {total_hitters} hitters for season {season}\n")
 
     original_argv = sys.argv.copy()
 
     success_count = 0
     fail_count = 0
-    skipped_count = 0
+    failed_hitters: list[str] = []
 
     try:
-        for _, row in hitters.iterrows():
+        for idx, (_, row) in enumerate(hitters.iterrows(), start=1):
             batter_id = int(row["batter_id"])
             batter_name = (
-                row["batter_name"]
-                if pd.notna(row["batter_name"])
+                str(row["batter_name"]).strip()
+                if "batter_name" in row and pd.notna(row["batter_name"])
                 else f"Hitter {batter_id}"
             )
 
-            games = get_hitter_games_in_season(engine, batter_id, season)
-
-            if games.empty:
-                skipped_count += 1
-                print(f"Skipping hitter with no games: {batter_name} ({batter_id})")
-                continue
-
-            print(f"Generating season report: {batter_name} ({batter_id})")
+            print(f"[{idx}/{total_hitters}] Generating hitter season report: {batter_name} ({batter_id})")
 
             try:
                 sys.argv = [
@@ -73,6 +77,7 @@ def generate_reports(season: int) -> None:
 
             except Exception as e:
                 fail_count += 1
+                failed_hitters.append(f"{batter_name} ({batter_id})")
                 print(f"Failed for hitter: {batter_name} ({batter_id})")
                 print(f"Error: {e}\n")
 
@@ -80,9 +85,17 @@ def generate_reports(season: int) -> None:
         sys.argv = original_argv
 
     print("\nBatch generation complete.")
+    print(f"Season:     {season}")
+    print(f"Total:      {total_hitters}")
     print(f"Successful: {success_count}")
-    print(f"Failed: {fail_count}")
-    print(f"Skipped: {skipped_count}\n")
+    print(f"Failed:     {fail_count}")
+
+    if failed_hitters:
+        print("\nFailed hitters:")
+        for hitter in failed_hitters:
+            print(f" - {hitter}")
+
+    print("")
 
 
 def main() -> None:

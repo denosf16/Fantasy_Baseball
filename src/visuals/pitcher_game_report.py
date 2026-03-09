@@ -15,11 +15,42 @@ from src.utils.report_helpers import (
     format_table_df,
     add_pitchtype_heatmap_grid,
 )
+from src.utils.output_router import get_output_path
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-OUT_DIR = BASE_DIR / "outputs" / "png" / "pitchers" / "game"
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def infer_pitcher_team_code(df: pd.DataFrame) -> str:
+    """
+    Infer the pitcher's team code from inning_half + home/away team.
+
+    For a pitcher:
+      - Top inning  -> home team is pitching
+      - Bottom inning -> away team is pitching
+    """
+    required_cols = {"inning_half", "home_team", "away_team"}
+    if not required_cols.issubset(df.columns):
+        return "UNK"
+
+    valid = df[
+        df["inning_half"].notna()
+        & df["home_team"].notna()
+        & df["away_team"].notna()
+    ]
+
+    if valid.empty:
+        return "UNK"
+
+    first_row = valid.iloc[0]
+    inning_half = str(first_row["inning_half"]).strip().lower()
+
+    if inning_half == "top":
+        return str(first_row["home_team"]).upper()
+    if inning_half == "bot":
+        return str(first_row["away_team"]).upper()
+
+    return "UNK"
 
 
 def main():
@@ -53,7 +84,10 @@ def main():
         if "pitcher_name" in df.columns and df["pitcher_name"].notna().any()
         else str(pitcher_id)
     )
-    game_date = build_title_date(df["game_date"].iloc[0])
+
+    game_date_raw = str(df["game_date"].iloc[0])
+    game_date_title = build_title_date(df["game_date"].iloc[0])
+    team_code = infer_pitcher_team_code(df)
 
     total_pitches = len(df)
     whiffs = int(df["is_whiff"].fillna(0).sum())
@@ -246,7 +280,7 @@ def main():
         r_pct = round(100 * r_count / r_total, 1) if len(df_rhb) else 0.0
         usage_lines.append(f"{pitch_type}: vs LHB {l_pct}% | vs RHB {r_pct}%")
 
-    title = f"{pitcher_name} Report\nGame {game_pk} | {game_date}"
+    title = f"{pitcher_name} Report\nGame {game_pk} | {game_date_title}"
     fig.suptitle(title, fontsize=22, y=0.985)
 
     fig.text(
@@ -310,7 +344,17 @@ def main():
         wspace=0.20,
     )
 
-    output_file = OUT_DIR / f"pitcher_report_{pitcher_id}_{game_pk}.png"
+    output_file = get_output_path(
+        report_family="player_overview",
+        time_grain="game",
+        side="pitching",
+        team_code=team_code,
+        game_date=game_date_raw,
+        player_name=pitcher_name,
+        player_id=pitcher_id,
+        output_format="png",
+    )
+
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     plt.close()
 

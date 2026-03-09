@@ -13,11 +13,50 @@ from src.utils.report_helpers import (
     format_table_df,
     add_pitchtype_heatmap_grid,
 )
+from src.utils.output_router import get_output_path
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-OUT_DIR = BASE_DIR / "outputs" / "png" / "pitchers" / "season"
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def infer_pitcher_team_code(df: pd.DataFrame) -> str:
+    """
+    Infer the pitcher's team code across a season sample.
+
+    For a pitcher:
+      - Top inning  -> home team is pitching
+      - Bottom inning -> away team is pitching
+
+    We take the most common inferred pitching team in the dataframe.
+    """
+    required_cols = {"inning_half", "home_team", "away_team"}
+    if not required_cols.issubset(df.columns):
+        return "UNK"
+
+    valid = df[
+        df["inning_half"].notna()
+        & df["home_team"].notna()
+        & df["away_team"].notna()
+    ].copy()
+
+    if valid.empty:
+        return "UNK"
+
+    def map_team(row):
+        inning_half = str(row["inning_half"]).strip().lower()
+        if inning_half == "top":
+            return str(row["home_team"]).upper()
+        if inning_half == "bot":
+            return str(row["away_team"]).upper()
+        return None
+
+    valid["pitching_team_code"] = valid.apply(map_team, axis=1)
+    valid = valid[valid["pitching_team_code"].notna()]
+
+    if valid.empty:
+        return "UNK"
+
+    return valid["pitching_team_code"].mode().iloc[0]
 
 
 def main():
@@ -52,6 +91,8 @@ def main():
         if "pitcher_name" in df.columns and df["pitcher_name"].notna().any()
         else str(pitcher_id)
     )
+
+    team_code = infer_pitcher_team_code(df)
 
     total_pitches = len(df)
     total_games = df["game_pk"].nunique()
@@ -312,7 +353,17 @@ def main():
         wspace=0.22,
     )
 
-    output_file = OUT_DIR / f"pitcher_season_report_{pitcher_id}_{season}.png"
+    output_file = get_output_path(
+        report_family="player_overview",
+        time_grain="season",
+        side="pitching",
+        team_code=team_code,
+        season=season,
+        player_name=pitcher_name,
+        player_id=pitcher_id,
+        output_format="png",
+    )
+
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     plt.close()
 

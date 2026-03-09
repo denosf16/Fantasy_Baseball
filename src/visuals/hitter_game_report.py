@@ -14,11 +14,42 @@ from src.utils.report_helpers import (
     build_pitch_summary_hitter,
     format_table_df,
 )
+from src.utils.output_router import get_output_path
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-OUT_DIR = BASE_DIR / "outputs" / "png" / "hitters" / "game"
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def infer_hitter_team_code(df: pd.DataFrame) -> str:
+    """
+    Infer the hitter's team code from inning_half + home/away team.
+
+    For a batter:
+      - Top inning  -> away team is batting
+      - Bottom inning -> home team is batting
+    """
+    required_cols = {"inning_half", "home_team", "away_team"}
+    if not required_cols.issubset(df.columns):
+        return "UNK"
+
+    valid = df[
+        df["inning_half"].notna()
+        & df["home_team"].notna()
+        & df["away_team"].notna()
+    ]
+
+    if valid.empty:
+        return "UNK"
+
+    first_row = valid.iloc[0]
+    inning_half = str(first_row["inning_half"]).strip().lower()
+
+    if inning_half == "top":
+        return str(first_row["away_team"]).upper()
+    if inning_half == "bot":
+        return str(first_row["home_team"]).upper()
+
+    return "UNK"
 
 
 def main():
@@ -47,7 +78,10 @@ def main():
         if "batter_name" in df.columns and df["batter_name"].notna().any()
         else str(batter_id)
     )
-    game_date = build_title_date(df["game_date"].iloc[0])
+
+    game_date_raw = str(df["game_date"].iloc[0])
+    game_date_title = build_title_date(df["game_date"].iloc[0])
+    team_code = infer_hitter_team_code(df)
 
     total_pitches_seen = len(df)
     swings = int(df["is_swing"].fillna(0).sum())
@@ -150,7 +184,7 @@ def main():
     ax_evla.set_ylabel("Exit Velocity")
     ax_evla.grid(alpha=0.15)
 
-    # Real Statcast spray chart if hc_x / hc_y are present
+    # Spray chart
     draw_spray_chart(ax_spray, bip_df, title="Spray Chart")
 
     # Game summary
@@ -257,7 +291,7 @@ def main():
             weight="bold",
         )
 
-    title = f"{batter_name} Hitter Report\nGame {game_pk} | {game_date}"
+    title = f"{batter_name} Hitter Report\nGame {game_pk} | {game_date_title}"
     fig.suptitle(title, fontsize=22, y=0.985)
 
     header_parts = [
@@ -300,7 +334,17 @@ def main():
         wspace=0.20,
     )
 
-    output_file = OUT_DIR / f"hitter_report_{batter_id}_{game_pk}.png"
+    output_file = get_output_path(
+        report_family="player_overview",
+        time_grain="game",
+        side="hitting",
+        team_code=team_code,
+        game_date=game_date_raw,
+        player_name=batter_name,
+        player_id=batter_id,
+        output_format="png",
+    )
+
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     plt.close()
 
